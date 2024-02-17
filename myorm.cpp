@@ -16,6 +16,7 @@
 #include<functional>
 #include<iostream>
 #include<sstream>
+#include<unordered_map>
 
 namespace myorm{
 
@@ -218,6 +219,8 @@ namespace myorm{
      std::stringstream& operator<<(std::stringstream&sm,optional<T>& value){
              if(value)
 	        sm<<*value;
+	     else
+		sm<<"null";
 	      return sm;
      }
 
@@ -225,9 +228,10 @@ namespace myorm{
      std::ostream& operator<<(std::ostream&om,optional<T>& value){
              if(value)
 	        om<<*value;
+	     else
+		om<<"null";
 	     return om;
      }
-
 
      template<int I,int All,typename Tuple,typename Function>
      typename std::enable_if<(I==All),void>::type
@@ -738,6 +742,52 @@ inline constexpr auto StructSchema<Struct>(){ \
      };
 
 
+
+     class schema{
+        private:
+	    std::unordered_map<std::string,std::string> field;
+            std::string key;
+	    std::string name;
+	public: 
+	    std::string stmt(){
+
+                 std::ostringstream stmt;
+		 stmt<<"create table "<<name<<" ( ";
+                 int size=field.size();
+		 int p=0;
+
+		 for(const auto& token:field){
+
+                     ++p;
+                     stmt<<token.first<<" ";
+		     stmt<<token.second<<" ";
+
+		     if(p==size){
+                          if(key.length()!=0)
+			    stmt<<", primary key ("<<key<<")";
+                          stmt<<");";
+		     }else{
+                          stmt<<", ";
+		     }
+		 }
+                 return stmt.str();
+	    }
+
+            schema(const std::string _name):name(_name){}
+
+            void setKey(const std::string _key){
+
+		if(field.count(_key)!=0){
+                    key=std::move(_key);
+		}
+	    }
+
+	    std::string& operator[](std::string _key){
+                return field[_key];
+	    }
+     };
+
+
      template<typename T>
      class table{
 
@@ -749,12 +799,45 @@ inline constexpr auto StructSchema<Struct>(){ \
 	       connection *conn;
 	   public:
 
-	       void insert(T& value){
+               std::string insert(T&& value){
+                    return std::move(insert(name.c_str(),value));
+	       }
+
+	       std::string insert(std::vector<T>& values){
+                    return std::move(insert(name.c_str(),values));
+	       }
+
+	       std::string insert(std::vector<T>&& values){
+                    return std::move(insert(name.c_str(),values));
+	       }
+
+               template<typename U,U T::* ptr>
+	       std::string remove(U&& value){
+                    return std::move(remove<U,ptr>(name.c_str(),std::forward<U&&>(value)));
+	       }
+
+               template<typename U,typename C,typename K>
+               std::string update(C&&field,U&&value,K&& condition){
+                    return std::move(update(name.c_str(),field,value,condition));
+	       }
+	       
+               template<typename... Args>
+	       std::string update(std::vector<std::string>&&fields,std::tuple<Args...>&& values,std::string&& condition){
+                  return std::move(update(
+			 name.c_str(),
+                         std::forward<decltype(fields)>(fields),
+			 std::forward<decltype(values)>(values),
+                         std::forward<std::string&&>(condition)
+			      ));
+	       }
+
+
+	       static std::string insert(const char* _name,T&& value){
 
                     std::ostringstream stmt;
 		    constexpr auto struct_schema=StructSchema<std::decay_t<T>>();
 	            int num=std::tuple_size<decltype(struct_schema)>::value-1;
-                    stmt<<"insert into "<<name<<" ( ";
+                    stmt<<"insert into "<<_name<<" ( ";
 
 		    ForEachField(value,[&stmt,num](auto&&field,auto&&name,int index){
 
@@ -766,26 +849,160 @@ inline constexpr auto StructSchema<Struct>(){ \
 	            }); 
 
 		    ForEachField(value,[&stmt,num](auto&&field,auto&&name,int index){
+                        
+                        using nf_type=typename std::remove_reference<decltype(field)>::type;
 
-                        if(index<num){
-                            stmt<<field<<", ";
+		        if(std::is_same<std::string,nf_type>::value||
+			   std::is_same<optional<std::string>,nf_type>::value){    
+			      if(index<num){
+				   stmt<<"'"<<field<<"' , ";
+			      }else{
+				   stmt<<"'"<<field<<"')"; 
+			      }
 			}else{
-                            stmt<<field<<" ) values ( "; 
+                              if(index<num){
+                                   stmt<<field<<" , ";
+			      }else{
+                                   stmt<<field<<" );";
+			      }
 			}
 	            }); 
-
+                    return stmt.str();
 	       }
 
-	       void insert(T&& value);
-               void insert(std::vector<T>& values);
+               static std::string insert(const char* _name,std::vector<T>& values){
+
+                    std::ostringstream stmt;
+                    constexpr auto struct_schema=StructSchema<std::decay_t<T>>();
+                    int num=std::tuple_size<decltype(struct_schema)>::value-1;
+
+                    stmt<<"insert into "<<_name<<" ( ";
+
+		    ForEachField(values[0],[&stmt,num](auto&&field,auto&&name,int index){
+
+                        if(index<num){
+                            stmt<<name<<", ";
+			}else{
+                            stmt<<name<<" ) values "; 
+			}
+	            }); 
+                    
+                    int size=values.size()-1;
+
+                    for(int i=0;i<=size;i++){
+
+			ForEachField(values[i],[&stmt,num](auto&&field,auto&&name,int index){
+			    
+			    using nf_type=typename std::remove_reference<decltype(field)>::type;
+
+			    if(std::is_same<std::string,nf_type>::value||
+			       std::is_same<optional<std::string>,nf_type>::value){    
+				  if(index==0){
+				       stmt<<"('"<<field<<"' , ";
+				  }else if(index<num){
+                                       stmt<<" '"<<field<<"' , ";
+				  }else{
+				       stmt<<"'"<<field<<"')"; 
+				  }
+			    }else{
+				  if(index==0){
+				       stmt<<"( "<<field<<" , ";
+				  }else if(index<num){
+				       stmt<<field<<" , ";
+				  }else{
+				       stmt<<field<<" )";
+				  }
+			    }
+			}); 
+                        if(i==size){
+                           stmt<<";";
+			}else{
+                           stmt<<",";
+			}
+		    }
+
+		    return stmt.str();
+	       }
                
-	       template<int I,typename U>
-	       void remove(U&& value);
-               
-	       template<int I,typename U>
-	       void update(U&& value);
-	       static void create(connection& conn,std::string&name);
+
+	       static std::string insert(const char* _name,std::vector<T>&& values){
+                      return std::move(insert(_name,values));
+	       }
+       
+               template<typename K,typename U,typename C>
+	       static
+	       typename std::enable_if<std::is_same<typename std::decay<K>::type,typename std::decay<U>::type>::value,void>::type
+	       remove_aux(K C::*& ptr1,U C::*&& ptr2,const char*& field,std::string& rc){
+                    rc=field;
+	       }
+
+               template<typename K,typename U,typename C>
+	       static
+	       typename std::enable_if<!std::is_same<typename std::decay<K>::type,typename std::decay<U>::type>::value,void>::type	
+	       remove_aux(K C::*& ptr1,U C::*&& ptr2,const char*& field,std::string& rc){
+                  
+	       }
+
+	       template<typename U,U T::* ptr>
+	       static std::string remove(const char* _name,U&& value){
+                   
+		   std::ostringstream stmt;
+		   stmt<<"delete from "<<_name<<" where ";
+                   
+                   constexpr auto struct_schema=StructSchema<std::decay_t<T>>();
+                      
+		   std::string field_name;
+
+		   eachTuple<0,std::tuple_size<decltype(struct_schema)>::value>
+		   (struct_schema,[&field_name](auto&field,int index){
+                     
+                         auto p=std::get<0>(std::forward<decltype(field)>(field));
+                         auto n=std::get<1>(std::forward<decltype(field)>(field));
+
+                         remove_aux(p,ptr,n,std::forward<std::string&>(field_name));
+		    });
+
+		    stmt<<field_name<<" = "<<value<<";";
+
+		    return stmt.str();
+	       }
+
+	       template<typename U,typename C,typename K>
+	       static std::string update(const char* _name,C&& field,U&& value,K&& condition){
+
+                      std::ostringstream stmt;
+                      stmt<<"update "<<_name<<" set "<<field<<" = "<<value<<" where "<<condition<<";";
+		      return stmt.str();
+	       }
+
+#define VALUES(...) std::make_tuple(__VA_ARGS__)
+
+               template<int I,int All,typename... Args>
+	       static
+	       typename std::enable_if<I+1==All,void>::type
+	       update_aux(std::ostringstream& stmt,std::vector<std::string>&fields,std::tuple<Args...>&& values){
+                    stmt<<fields[I]<<" = "<<std::get<I>(std::forward<decltype(values)>(values))<<" ";
+	       }
+	       
+               template<int I,int All,typename... Args>
+	       static
+	       typename std::enable_if<I+1<All,void>::type
+	       update_aux(std::ostringstream& stmt,std::vector<std::string>&fields,std::tuple<Args...>&& values){
+                    stmt<<fields[I]<<" = "<<std::get<I>(std::forward<decltype(values)>(values))<<",";
+		    update_aux<I+1,All>(stmt,fields,std::forward<decltype(values)>(values));
+	       }
+
+               template<typename... Args>
+	       static std::string
+	       update(const char* _name,std::vector<std::string>&& fields,std::tuple<Args...>&& values,std::string&& condition){
+                    std::ostringstream stmt;
+		    stmt<<"update "<<_name<<" set ";
+		    update_aux<0,sizeof...(Args)>(stmt,fields,std::forward<decltype(values)>(values));
+		    stmt<<" where "<<condition<<";";
+		    return stmt.str();
+	       }
      };
+
 
      class connection{
 
@@ -903,32 +1120,6 @@ inline constexpr auto StructSchema<Struct>(){ \
 }
 
 
-void pan(int x){
-
-     if(x<=50){
-
-	throw myorm::mysql_exception("problem\n");
-
-     }
-     
-     std::cout<<"ok"<<std::endl;
-
-}
-    
-
-     void dod(myorm::optional<std::string> &name,myorm::optional<int> &age,myorm::optional<long long>&id,myorm::optional<std::string>& addr){
-
-
-	 std::cout<<"I'm "<<*name<<", my age is "<<*age<<std::endl;
-
-          if(id){
-	      std::cout<<"my id is "<<*id<<std::endl;
-	  }else{
-	      std::cout<<"I don't have id"<<std::endl;
-	  }
-
-	  std::cout<<"my addr is "<<*addr<<std::endl;
-     }
 
 
 struct Node{
@@ -950,7 +1141,23 @@ DEFINE_STRUCT(
      int main(){
 
 
-         Node nn;
+         Node nn,kk,pp;
+
+         nn.name="huanggang";
+         nn.age=21;
+         nn.id=3406736025;
+	 nn.addr="南宁";
+         
+	 kk.name="lsq";
+	 kk.age=123;
+	 kk.addr="zk";
+
+	 pp.name="waq";
+	 pp.age=18;
+	 pp.id=1234567890;
+	 pp.addr="普顺";
+
+         std::vector<Node> values={nn,kk,pp};
 
          if(myorm::is_option<decltype(nn.addr)>::value){
             std::cout<<"YES"<<std::endl;
@@ -958,38 +1165,30 @@ DEFINE_STRUCT(
             std::cout<<"NO"<<std::endl;
 	 }
 
+         std::cout<<myorm::table<Node>::insert("test_table",{kk,nn,pp})<<std::endl;
+	 std::cout<<myorm::table<Node>::remove<int,&Node::age>("test_table",2)<<std::endl;
+         std::cout<<myorm::table<Node>::update("test_table","age",12,"id=2107310108")<<std::endl;
+	 std::cout<<myorm::table<Node>::update("test_table",{"age","name","addr"},VALUES(123,"waq","南宁"),"id=2107310108")<<std::endl;
 
+	 myorm::schema tb("users");
+
+	 tb["age"]="int not null";
+	 tb["name"]="varchar(50) not null";
+	 tb["addr"]="varchar(50)";
+         tb.setKey("age");
+
+	 std::cout<<tb.stmt()<<std::endl;
 
 	 myorm::connection conn(myorm::connect_options("localhost","root","Hg@200258","hg_test"));
 
          if(conn){
-
-/*	     
-              auto res=conn.query("select * from test_table");
-
-              for(int i=0;i<res.field();i++){
-                   std::cout<<res.field_name_at(i)<<"   ";
-	      }
-              
-              std::cout<<std::endl;
-
-              for(int i=0;i<res.field();i++){
-                   std::cout<<res.field_type_at(i)<<"   ";
-	      }
-
-
-	      std::cout<<std::endl;
-
-              res.each(&dod);
-*/
 
               auto table=conn.get_table<Node>("test_table");
 
 	      for(auto& row:table){
                   std::cout<<"name:"<<row.name<<std::endl;
                   std::cout<<"age:"<<row.age<<std::endl;
-	//	  if(row.id)
-                      std::cout<<"id:"<<row.id<<std::endl;
+                  std::cout<<"id:"<<row.id<<std::endl;
                   std::cout<<"addr:"<<row.addr<<std::endl;
 	      }
 	 }
