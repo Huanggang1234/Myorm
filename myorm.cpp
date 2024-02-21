@@ -16,9 +16,83 @@
 #include<functional>
 #include<iostream>
 #include<sstream>
-#include<unordered_map>
+#include<mutex>
+
+#define MYORM_SHOW_STETMENT
 
 namespace myorm{
+
+     struct date{
+        uint32_t year;
+	uint32_t  month;
+	uint32_t  day;
+        date(const char*str){
+           int count=sscanf(str,"%u-%u-%u",&year,&month,&day);
+	   if(count!=3)
+	       throw std::invalid_argument("myorm::date initialzed error:the format is not %u-%u-%u");
+	}
+	date(){}
+     };
+
+     std::ostream& operator<<(std::ostream& os,const date& v){
+            os<<v.year<<"-"<<v.month<<"-"<<v.day;
+	    return os;
+     }
+
+     std::stringstream& operator<<(std::stringstream& os,const date& v){
+            os<<v.year<<"-"<<v.month<<"-"<<v.day;
+	    return os;
+     }
+
+
+     struct time{
+        uint32_t hour;
+	uint32_t minute;
+	uint32_t second;
+	time(const char*str){
+           int count=sscanf(str,"%u:%u:%u",&hour,&minute,&second);
+	   if(count!=3)
+	       throw std::invalid_argument("myorm::time initialzed error:the format is not %u:%u:%u");
+	}
+	time(){}
+     };
+
+     std::ostream& operator<<(std::ostream& os,const time& v){
+           os<<v.hour<<":"<<v.minute<<":"<<v.second;
+	   return os;
+     }
+     std::stringstream& operator<<(std::stringstream& os,const time& v){
+           os<<v.hour<<":"<<v.minute<<":"<<v.second;
+	   return os;
+     }
+
+
+     struct datetime{
+        uint32_t year;
+	uint32_t month;
+	uint32_t day;
+	uint32_t hour;
+	uint32_t minute;
+	uint32_t second;
+        datetime(const char*str){
+           int count=sscanf(str,"%u-%u-%u %u:%u:%u",&year,&month,&day,&hour,&minute,&second);
+	   if(count!=6)
+	       throw std::invalid_argument("myorm::datetime initialzed error:the format is not %u-%u-%u %u:%u:%u");
+	}
+	datetime(){}
+     };
+
+     std::ostream& operator<<(std::ostream& os,const datetime& v){
+           os<<v.year<<"-"<<v.month<<"-"<<v.day<<" ";
+           os<<v.hour<<":"<<v.minute<<":"<<v.second;
+	   return os;
+     }
+
+     std::stringstream& operator<<(std::stringstream& os,const datetime& v){
+           os<<v.year<<"-"<<v.month<<"-"<<v.day<<" ";
+           os<<v.hour<<":"<<v.minute<<":"<<v.second;
+	   return os;
+     }
 
      template<typename T>
      struct no_const_and_reference{
@@ -99,6 +173,7 @@ namespace myorm{
          using raw_return_type=typename lambda::raw_return_type;
      };
 
+
      class __null_value{};
      const __null_value null_value;
 
@@ -115,9 +190,19 @@ namespace myorm{
 	       template<typename... Args>
 	       optional(Args... args):no_value(false),value(args...){}
 
+               optional(const __null_value& _value):no_value(true){}
+
                const T& operator*(){
                    return value;
 	       }
+
+               template<typename... Args>
+	       const optional& operator=(Args&&... args){
+                     no_value=false;
+		     value=T(std::forward<Args&&>(args)...);
+		     return *this;
+	       }
+
 
                const optional& operator=(const optional& _value){
                      no_value=_value.no_value;
@@ -148,59 +233,6 @@ namespace myorm{
                     return !no_value;
 	       }
 
-     };
-
-
-     template<>
-     class optional<std::string>{
-
-           private:
-	       bool no_value;
-               std::string value;
-	   public:
-
-	       optional():no_value(true){}
-
-               template<typename... Args>
-	       optional(Args... args):no_value(false),value(args...){}
-
-
-	       const std::string& operator*(){
-                     return value;
-	       }
-              
-               const optional<std::string>& operator=(const optional<std::string>& _value){
-                     no_value=_value.no_value;
-		     value=_value.value;
-		     return *this;
-	       }
-
-               const std::string& operator=(const std::string& _value){
-                     no_value=false;
-		     value=_value;
-		     return value;
-	       }
-
-               const std::string& operator=(const std::string&& _value){
-                     no_value=false;
-		     value=std::move(_value);
-		     return value;
-	       }
-
-               const std::string& operator=(const char* _value){
-                     no_value=false;
-		     value=_value;
-		     return value;
-	       }
-
-	       const __null_value& operator=(const __null_value& _null_value){
-                     no_value=true;
-		     return _null_value;
-	       }
-
-	       operator bool() const{
-                    return !no_value;
-	       }
      };
 
      template<typename T>
@@ -263,6 +295,49 @@ namespace myorm{
 		std::get<1>(std::forward<decltype(field_schema)>(field_schema)),index);
 	 });
      }
+
+     template<typename T>
+     constexpr
+     typename std::enable_if<is_option<typename std::decay<T>::type>::value,bool>::type
+     needp(T&& value){
+
+         using nf_type=typename std::decay<T>::type;
+
+	 if(std::is_same<optional<std::string>,nf_type>::value||
+	    std::is_same<optional<date>,nf_type>::value||
+	    std::is_same<optional<time>,nf_type>::value||
+	    std::is_same<optional<datetime>,nf_type>::value){
+	     
+	    if(value){
+		return true;
+	    }else{
+		return false;
+            }
+
+	 }else{
+	    return false;
+	 }
+     }
+
+     template<typename T>
+     constexpr
+     typename std::enable_if<(!is_option<typename std::decay<T>::type>::value),bool>::type
+     needp(T&& value){
+
+         using nf_type=typename std::decay<T>::type;
+	 
+	 if(std::is_same<std::string,nf_type>::value||
+	    std::is_same<date,nf_type>::value||
+	    std::is_same<time,nf_type>::value||
+	    std::is_same<datetime,nf_type>::value){
+	    return true;
+	 }else{
+	    return false;
+	 }
+     }
+
+
+
 
 
 #define DEFINE_STRUCT(Struct,...) \
@@ -348,6 +423,8 @@ inline constexpr auto StructSchema<Struct>(){ \
 
      class result{
 
+           friend class connection;
+
            public:
 
 	      template<typename... Args>
@@ -360,13 +437,16 @@ inline constexpr auto StructSchema<Struct>(){ \
 	      };
 
            private:
-              MYSQL* conn=nullptr;
+              MYSQL_RES *res;
 	      std::vector<std::string> field_name;
 	      std::vector<enum_field_types> field_type;
+	      std::vector<std::vector<bool>> is_null;
               std::vector<std::vector<std::string>> rows;
               std::vector<std::vector<std::string>>::iterator current_row_itr;
-              bool fetched=false;
+              bool available=false;
 	      uint32_t  fields_num=0;
+	      uint64_t  affected_rows=0;
+	      std::string error_msg="";
 
               template<typename Function,typename... Args>
               typename std::enable_if<(sizeof...(Args)<function_trait<Function>::args_num),void>::type
@@ -383,53 +463,35 @@ inline constexpr auto StructSchema<Struct>(){ \
                    callback(args...);
 	      }
 
-
-
-           public:
-
-              result(MYSQL* _conn, bool _fetch_now=false):conn(_conn){
-
-		  if(_fetch_now)fetch();
-	      }
-
-              ~result(){
-
-                  if(!fetched)fetch();
-                  field_name.clear();
-		  field_type.clear();
-                  rows.clear();
-	      }
-         
-              void check(){
-                   if(!fetched)fetch();
-	      }
-
               void fetch(){
-
-                    if(fetched) {
-			throw mysql_exception("already fetched");
-		    }
-                   
-		    MYSQL_RES *res=mysql_store_result(conn);
-                    
+                           
 		    fields_num=mysql_num_fields(res);
 		    auto fields=mysql_fetch_fields(res);
 
                     if(res!=nullptr){
 
+                      is_null.reserve(mysql_num_rows(res));
+		      rows.reserve(mysql_num_rows(res));
+
                       for(MYSQL_ROW row=mysql_fetch_row(res);row!=nullptr;row=mysql_fetch_row(res)){
 
 			   unsigned long* lengths=mysql_fetch_lengths(res);
 
-			   if(!lengths) throw mysql_exception(mysql_error(conn));
+			   if(!lengths) throw mysql_exception("mysql_fetch_lengths():error");
                            
-                           std::vector<std::string> rrow;
+                           std::vector<std::string> rrow; rrow.reserve(fields_num);
+                           std::vector<bool> isNull; isNull.reserve(fields_num);
 
 			   for(int i=0;i<fields_num;i++){
                                rrow.push_back(std::string(row[i],lengths[i]));
+			       if(row[i]==nullptr)
+				  isNull.push_back(true);
+			       else
+				  isNull.push_back(false);
 			   }
-
+                           
 			   rows.push_back(std::move(rrow));
+			   is_null.push_back(std::move(isNull));
 		      }
                       
                       for(int i=0;i<fields_num;i++){
@@ -437,26 +499,53 @@ inline constexpr auto StructSchema<Struct>(){ \
                            field_type.push_back(fields[i].type);
 		      }
 
-                      fetched=true;
 		      current_row_itr=rows.begin();
 
                       mysql_free_result(res);      
 
-		    }else{
-
-                      throw mysql_exception(mysql_error(conn));
-
 		    }
 	      }
 
+              result(MYSQL_RES* _res):res(_res){
+		     fetch();
+		     available=true;
+	      }
+
+              result(const char* error):error_msg(error){
+                     available=false;
+	      }
+
+              result(uint64_t _rows):affected_rows(_rows){
+                     available=true;
+	      }
+
+           public:
+
+              ~result(){
+		  if(available){
+                     field_name.clear();
+		     field_type.clear();
+                     rows.clear();
+		  }
+	      }
+
+	      uint64_t affected(){
+                  return affected_rows;
+	      }
+
+              operator bool(){
+                  return available;    
+	      }
+
+              const std::string& error(){
+                  return error_msg;
+	      }
 
 	      uint64_t count(){
-		  check();
 		  return rows.size();
 	      }
 
 	      uint32_t field(){
-                  check();
 		  return fields_num;
 	      }
 
@@ -470,43 +559,35 @@ inline constexpr auto StructSchema<Struct>(){ \
 
 
               bool eof(){
-		   check();
                    return current_row_itr==rows.end();
 	      }
 	      
               
 	      void next(){
-		   check();
                    current_row_itr++;
 	      }
 
               void prev(){
-		   check();
                    current_row_itr--;
 	      }
 
               uint64_t tell(){
-
-		   check();
                    return current_row_itr-rows.begin();
 	      }
 
               void seek(uint64_t offset){
-
-		   check();
                    current_row_itr=rows.begin()+offset;
 	      }
 
 
               const char* fetch_field_data(uint32_t index){
-		    check();
-                    return (*current_row_itr)[index].c_str();
+		    if((index<fields_num)&&(!is_null[tell()][index]))
+                      return (*current_row_itr)[index].c_str();
+		    return nullptr;
 	      }
 
-              const std::vector<std::vector<std::string>>& res(){
-
+              const std::vector<std::vector<std::string>>& raw(){
 		    return rows;
-
 	      }
 
               template<typename T>
@@ -524,6 +605,54 @@ inline constexpr auto StructSchema<Struct>(){ \
 		   }
 	      }
 
+              bool get_value(int i,date& value){
+
+		   const char* s=fetch_field_data(i);
+
+                   if(s==nullptr)return false;
+
+		   try{
+
+                       value=s;
+                       return true;
+
+		   }catch(std::exception&){
+
+                       return false;
+		   }
+	      }
+              bool get_value(int i,time& value){
+
+		   const char* s=fetch_field_data(i);
+
+                   if(s==nullptr)return false;
+
+		   try{
+
+                       value=s;
+                       return true;
+
+		   }catch(std::exception&){
+
+                       return false;
+		   }
+	      }
+              bool get_value(int i,datetime& value){
+
+		   const char* s=fetch_field_data(i);
+
+                   if(s==nullptr)return false;
+
+		   try{
+
+                       value=s;
+                       return true;
+
+		   }catch(std::exception&){
+
+                       return false;
+		   }
+	      }
 
               bool get_value(int i,bool& value){
 
@@ -733,19 +862,36 @@ inline constexpr auto StructSchema<Struct>(){ \
               void each(Function&& callback){
                    
 		  seek(0);
-
 		  while(!eof()){
                      bind_and_call(std::forward<Function&&>(callback));
 		     next();
 		  }
 	      }
+
+              template<typename T>
+              std::vector<T> get_table(){
+
+                   std::vector<T> rc;;
+
+		   while(!eof()){
+
+                       T  node;
+                       ForEachField(node,[this](auto&&field,auto&&name,int index){
+                            get_value(index,std::forward<decltype(field)>(field));
+		       });
+                       rc.push_back(std::move(node));
+		       next();
+		   }
+		   return std::move(rc);
+	     }
+
      };
 
 
 
      class schema{
         private:
-	    std::unordered_map<std::string,std::string> field;
+	    std::vector<std::pair<std::string,std::string>> field;
             std::string key;
 	    std::string name;
 	public: 
@@ -777,13 +923,22 @@ inline constexpr auto StructSchema<Struct>(){ \
 
             void setKey(const std::string _key){
 
-		if(field.count(_key)!=0){
+                bool found=false;
+		for(auto& p:field){
+                   if(p.first==_key){
+                     found=true;
+		     break;
+		   }
+		}
+
+		if(found){
                     key=std::move(_key);
 		}
 	    }
 
 	    std::string& operator[](std::string _key){
-                return field[_key];
+                 field.push_back({_key,""});
+		 return field.back().second;
 	    }
      };
 
@@ -798,6 +953,103 @@ inline constexpr auto StructSchema<Struct>(){ \
 	       std::vector<T>  data;
 	       connection *conn;
 	   public:
+
+               table(std::string&& _name):name(_name){}
+	       table(std::string& _name):name(_name){}
+	       table(const char* _name):name(_name){}
+
+
+               template<typename... Args,typename Function,typename U>
+	       typename std::enable_if<(sizeof...(Args)==0),void>::type
+	       each_args(Function&& callback,U&& value,Args... args){
+                    callback(std::forward<U&&>(value),true);     
+	       }
+
+               template<typename... Args,typename Function,typename U>
+	       typename std::enable_if<(sizeof...(Args)>0),void>::type
+	       each_args(Function&& callback,U&& value,Args... args){
+                    callback(std::forward<U&&>(value),false);
+                    each_args(std::forward<Function&&>(callback),args...);
+	       }
+              
+
+	       template<typename... Args>
+	       typename std::enable_if<(sizeof...(Args)>0),std::string>::type
+               select(Args&&... args){
+
+		    std::ostringstream stmt;
+
+                    stmt<<"select ";
+
+		    each_args([&stmt](auto&& value,bool fin){
+                                 if(fin){
+                                     stmt<<value<<" ";
+				 }else{
+                                     stmt<<value<<", ";
+				 }
+			    },std::forward<Args&&>(args)...);
+
+		    stmt<<" from "<<name<<" ;";
+
+		    return stmt.str();
+	       }
+
+	       std::string select(){
+                    return "select * from "+name+" ;";
+	       }
+
+	       std::string select(std::vector<std::string>&& fields,const char*where=nullptr){
+
+                   int size=fields.size();
+
+		   std::ostringstream stmt;
+
+		   if(size==0){
+
+		       stmt<<"select * from "<<name<<" ";
+
+                       if(where!=nullptr){
+
+                            stmt<<"where "<<where<<" ;";
+
+		       }else{
+                            stmt<<";";
+		       }
+
+		
+		   }else{
+
+                       int count=0;
+
+		       stmt<<"select ";
+
+		       for(auto& str:fields){
+
+                            count++;
+
+			    if(count==size){
+                                stmt<<str<<" ";
+			    }else{
+                                stmt<<str<<", ";
+			    }
+		       }
+                        
+		       stmt<<"from "<<name<<" ";
+
+                       if(where!=nullptr){
+
+                             stmt<<"where "<<where<<" ;";
+		       }else{
+                             stmt<<";";
+		       }
+		   }
+  
+                   return stmt.str();		   
+	       }
+
+               std::string insert(T&value){
+                    return std::move(insert(name.c_str(),value));
+	       }
 
                std::string insert(T&& value){
                     return std::move(insert(name.c_str(),value));
@@ -816,6 +1068,10 @@ inline constexpr auto StructSchema<Struct>(){ \
                     return std::move(remove<U,ptr>(name.c_str(),std::forward<U&&>(value)));
 	       }
 
+               std::string remove(const char* where){
+                    return std::move(remove(name.c_str(),where));
+	       }
+
                template<typename U,typename C,typename K>
                std::string update(C&&field,U&&value,K&& condition){
                     return std::move(update(name.c_str(),field,value,condition));
@@ -831,8 +1087,11 @@ inline constexpr auto StructSchema<Struct>(){ \
 			      ));
 	       }
 
+               static std::string insert(const char* _name,T&&value){
+                      return std::move(insert(_name,value));
+	       }
 
-	       static std::string insert(const char* _name,T&& value){
+	       static std::string insert(const char* _name,T& value){
 
                     std::ostringstream stmt;
 		    constexpr auto struct_schema=StructSchema<std::decay_t<T>>();
@@ -851,9 +1110,8 @@ inline constexpr auto StructSchema<Struct>(){ \
 		    ForEachField(value,[&stmt,num](auto&&field,auto&&name,int index){
                         
                         using nf_type=typename std::remove_reference<decltype(field)>::type;
-
-		        if(std::is_same<std::string,nf_type>::value||
-			   std::is_same<optional<std::string>,nf_type>::value){    
+    
+			if(needp(field)){
 			      if(index<num){
 				   stmt<<"'"<<field<<"' , ";
 			      }else{
@@ -894,10 +1152,9 @@ inline constexpr auto StructSchema<Struct>(){ \
 			ForEachField(values[i],[&stmt,num](auto&&field,auto&&name,int index){
 			    
 			    using nf_type=typename std::remove_reference<decltype(field)>::type;
-
-			    if(std::is_same<std::string,nf_type>::value||
-			       std::is_same<optional<std::string>,nf_type>::value){    
-				  if(index==0){
+ 
+                            if(needp(field)){
+			          if(index==0){
 				       stmt<<"('"<<field<<"' , ";
 				  }else if(index<num){
                                        stmt<<" '"<<field<<"' , ";
@@ -962,16 +1219,38 @@ inline constexpr auto StructSchema<Struct>(){ \
                          remove_aux(p,ptr,n,std::forward<std::string&>(field_name));
 		    });
 
-		    stmt<<field_name<<" = "<<value<<";";
+                    using nf_type=typename std::decay<U>::type;
 
+		    stmt<<field_name<<" = ";
+  
+		    if(needp(value)){
+		        stmt<<"'"<<value<<"';";
+		    }else{
+		        stmt<<value<<";";
+                    }
 		    return stmt.str();
 	       }
+
+               static std::string remove(const char* _name,const char* where){
+
+                      std::ostringstream stmt;
+                      stmt<<"delete from "<<_name<<" where "<<where<<" ;";
+		      return stmt.str();
+	       }
+               
 
 	       template<typename U,typename C,typename K>
 	       static std::string update(const char* _name,C&& field,U&& value,K&& condition){
 
                       std::ostringstream stmt;
-                      stmt<<"update "<<_name<<" set "<<field<<" = "<<value<<" where "<<condition<<";";
+
+                      stmt<<"update "<<_name<<" set "<<field<<" = ";
+		      if(needp(field)){
+                           stmt<<"'"<<value<<"'";
+		      }else{
+                           stmt<<value;
+		      }
+		      stmt<<" where "<<condition<<";";
 		      return stmt.str();
 	       }
 
@@ -981,21 +1260,37 @@ inline constexpr auto StructSchema<Struct>(){ \
 	       static
 	       typename std::enable_if<I+1==All,void>::type
 	       update_aux(std::ostringstream& stmt,std::vector<std::string>&fields,std::tuple<Args...>&& values){
-                    stmt<<fields[I]<<" = "<<std::get<I>(std::forward<decltype(values)>(values))<<" ";
+                   
+		   stmt<<fields[I]<<" = ";
+		   if(needp(std::get<I>(std::forward<decltype(values)>(values)))){
+		       stmt<<"'"<<std::get<I>(std::forward<decltype(values)>(values))<<"'";
+		   }else{
+                       stmt<<std::get<I>(std::forward<decltype(values)>(values));
+		   }
+	           stmt<<" ";
 	       }
 	       
                template<int I,int All,typename... Args>
 	       static
 	       typename std::enable_if<I+1<All,void>::type
 	       update_aux(std::ostringstream& stmt,std::vector<std::string>&fields,std::tuple<Args...>&& values){
-                    stmt<<fields[I]<<" = "<<std::get<I>(std::forward<decltype(values)>(values))<<",";
-		    update_aux<I+1,All>(stmt,fields,std::forward<decltype(values)>(values));
+
+		   stmt<<fields[I]<<" = ";
+		   if(needp(std::get<I>(std::forward<decltype(values)>(values)))){
+		       stmt<<"'"<<std::get<I>(std::forward<decltype(values)>(values))<<"'";
+		   }else{
+                       stmt<<std::get<I>(std::forward<decltype(values)>(values));
+		   }
+	           stmt<<", ";
+                   
+		   update_aux<I+1,All>(stmt,fields,std::forward<decltype(values)>(values));
 	       }
 
                template<typename... Args>
 	       static std::string
 	       update(const char* _name,std::vector<std::string>&& fields,std::tuple<Args...>&& values,std::string&& condition){
                     std::ostringstream stmt;
+
 		    stmt<<"update "<<_name<<" set ";
 		    update_aux<0,sizeof...(Args)>(stmt,fields,std::forward<decltype(values)>(values));
 		    stmt<<" where "<<condition<<";";
@@ -1003,25 +1298,50 @@ inline constexpr auto StructSchema<Struct>(){ \
 	       }
      };
 
+     namespace variable{
+          static std::mutex overall_mutex;
+     }
 
      class connection{
 
            private:
               MYSQL* conn;
-
+              std::mutex mtx;
+	      std::string error_msg;
 	   public:
 
 	      connection(const connect_options& options){
-                 
+                   
+		   variable::overall_mutex.lock();
                    conn=mysql_init(nullptr);
+		   variable::overall_mutex.unlock();
+		   if(conn==nullptr){
+                       error_msg="insufficient memory";
+		       return;
+		   }
 		   open(options);
 	      }
              
               ~connection(){
- 
-		   mysql_close(conn);
+                   if(conn!=nullptr)
+		     mysql_close(conn);
 
 	      }
+
+              connection(const connection&)=delete;
+
+              connection(connection&& other) noexcept{
+
+                   other.mtx.lock();
+                   conn=other.conn;
+		   other.conn=nullptr;
+		   other.mtx.unlock();
+	      }
+
+              const std::string& error(){
+                   return error_msg;
+	      }
+
 
               bool open(const connect_options& options){
 
@@ -1038,8 +1358,14 @@ inline constexpr auto StructSchema<Struct>(){ \
 //                   unsigned int port,
 //                   const char* unix_socket,
 //                   unsigned int client_flag)
-                  conn=mysql_real_connect(conn,options.server.c_str(),options.user.c_str(),options.password.c_str(),options.dbname.c_str(),options.port,nullptr,0);
-                  
+//
+//
+                  if(mysql_real_connect(conn,options.server.c_str(),options.user.c_str(),options.password.c_str(),options.dbname.c_str(),options.port,nullptr,0)
+                     ==nullptr){
+                     error_msg=mysql_error(conn);
+		     conn=nullptr;
+		  }
+
 		  return conn==nullptr;
 	      }
 
@@ -1067,136 +1393,336 @@ inline constexpr auto StructSchema<Struct>(){ \
 	      }
 
               result query(const std::string& stmt){
+                  
+		   bool ok=false; 
+                   MYSQL_RES *res=nullptr;
 
-                   mysql_real_query(conn,stmt.c_str(),stmt.length());
+#ifdef MYORM_SHOW_STETMENT		   
+                   std::cout<<"the stmt:"<<stmt<<std::endl;
+#endif
 
-		   return result(conn,true);
+		   {
+		       std::lock_guard<std::mutex> guard(mtx);
+		       if(mysql_real_query(conn,stmt.c_str(),stmt.length())!=0){
+			    error_msg=mysql_error(conn);
+		       }else{
+
+			    res=mysql_store_result(conn);
+			
+			    if(res==nullptr&&mysql_errno(conn)!=0){
+				
+		                error_msg=mysql_error(conn);
+			    }else if(res==nullptr){
+                                ok=true;
+				return result(mysql_affected_rows(conn));
+			    }else{
+                                ok=true;
+			    }
+                       }		       
+                   }
+                   if(ok)            
+		     return result(res);
+                   return result(error_msg.c_str());
 	      }
 
 	      result query(const std::string&& stmt){
 
-                   mysql_real_query(conn,stmt.c_str(),stmt.length());
+		   bool ok=false; 
+                   MYSQL_RES *res=nullptr;
+#ifdef MYORM_SHOW_STETMENT
+                   std::cout<<"the stmt:"<<stmt<<std::endl;
+#endif
+		   {
+		       std::lock_guard<std::mutex> guard(mtx);
+		       if(mysql_real_query(conn,stmt.c_str(),stmt.length())!=0){
+			    error_msg=mysql_error(conn);
+		       }else{
 
-		   return result(conn,true);
+			    res=mysql_store_result(conn);
+			
+			    if(res==nullptr&&mysql_errno(conn)!=0){
+				
+		                error_msg=mysql_error(conn);
+			    }else if(res==nullptr){
+                                ok=true;
+				return result(mysql_affected_rows(conn));
+			    }else{
+                                ok=true;
+			    }
+		       }
+                   }
+                   if(ok)            
+		     return result(res);
+                   return result(error_msg.c_str());
+
 	      }
 
               template<typename... Args>
 	      result query(const char* format,Args... args){
 
                    std::string stmt=format_string(format,args...);
-		   std::cout<<"the stmt:"<<stmt<<std::endl;
                    return query(stmt);
 	      }
 
-              template<typename T>
-              std::vector<T> get_table(std::string& name){
+              bool startTransaction(){
+		   return mysql_autocommit(conn,false);	      
+	      }
 
-                   std::string stmt="select * from "+name;
+	      bool commit(){
+                   return mysql_commit(conn);
+	      }
 
-		   auto res=query(stmt);
+              bool rollback(){
+                   return mysql_rollback(conn);
+	      }
 
-                   std::vector<T> rc;
-
-		   int field=res.field();
-
-		   while(!res.eof()){
-
-                       T  node;
-                       ForEachField(node,[&res](auto&&field,auto&&name,int index){
-                            res.get_value(index,std::forward<decltype(field)>(field));
-		       });
-                       rc.push_back(std::move(node));
-		       res.next();
-		   }
-		   return std::move(rc);
-	     }
-
-             template<typename T>
-             std::vector<T> get_table(std::string&& name){
-                  return std::move(get_table<T>(name));
-	     }
+	      bool endTransaction(){
+		   return mysql_autocommit(conn,true);
+	      }
      };
 
 }
 
-
-
+     using namespace myorm;
+     using namespace std;
 
 struct Node{
-    std::string name;
-    int age;
-    myorm::optional<long long> id;
-    std::string addr;
+     std::string name;
+     int id;
+     optional<std::string> sex;
+     optional<int> age;
 };
+
 
 DEFINE_STRUCT(
     Node,
     DEFINE_FIELD(name,"name"),
-    DEFINE_FIELD(age,"age"),
     DEFINE_FIELD(id,"id"),
-    DEFINE_FIELD(addr,"addr")
-);
+    DEFINE_FIELD(sex,"sex"),
+    DEFINE_FIELD(age,"age")
+)
+
+
+struct Node2{
+    int id;
+    optional<date> k1;
+    optional<myorm::time> k2;
+    optional<datetime> k3;
+};
+
+DEFINE_STRUCT(
+    Node2,
+    DEFINE_FIELD(id,"id"),
+    DEFINE_FIELD(k1,"k1"),
+    DEFINE_FIELD(k2,"k2"),
+    DEFINE_FIELD(k3,"k3")
+)
 
 
      int main(){
 
+	 connection conn(myorm::connect_options("localhost","root","Hg@200258","hg_test"));
+/*
+         schema tab("myorm");
 
-         Node nn,kk,pp;
+	 tab["name"]="varchar(30) not null";
+         tab["id"]="int not null";
+	 tab["sex"]="varchar(10)";
+	 tab["age"]="int";
+	 tab.setKey("id");
 
-         nn.name="huanggang";
-         nn.age=21;
-         nn.id=3406736025;
-	 nn.addr="南宁";
-         
-	 kk.name="lsq";
-	 kk.age=123;
-	 kk.addr="zk";
+         result&& res=conn.query(tab.stmt());
+*/      
+//        table<Node> tb("myorm");
 
-	 pp.name="waq";
-	 pp.age=18;
-	 pp.id=1234567890;
-	 pp.addr="普顺";
+//         auto&& res=conn.query(tb.insert({"zqz",28177051,null_value,null_value}));
+/*
+         auto&& res=conn.query(tb.update("id",31415926,"name like 'd%'"));
+*/
 
-         std::vector<Node> values={nn,kk,pp};
+//         auto&& res=conn.query(tb.remove<int,&Node::age>(null_value));
 
-         if(myorm::is_option<decltype(nn.addr)>::value){
-            std::cout<<"YES"<<std::endl;
+//         auto&& res=conn.query(tb.remove("sex='男'"));
+
+//         auto&& res=conn.query(tb.select({"name","age"},"name='waq'"));
+      
+//	 auto&& res=conn.query(tb.select("name","id"));
+
+/*
+         datetime nn;
+	 nn.year=2002;
+	 nn.month=6;
+	 nn.day=18;
+	 nn.hour=9;
+	 nn.minute=17;
+	 nn.second=37;
+
+	 cout<<nn<<endl;
+
+
+         optional<std::string> k1="huangg";
+	 optional<date> k2="2002-6-18";
+	 optional<myorm::time> k3="14:34:52";
+	 optional<datetime> k4="1998-9-10 13:7:12";
+	 std::string k5;
+	 date k6;
+	 myorm::time k7;
+	 datetime k8;
+         optional<int> k9;
+	 int k10;
+
+         cout<<"k3:"<<k3<<endl;
+
+          if(needp(k1))
+	     cout<<1<<endl;
+          if(needp(k2))
+	     cout<<2<<":"<<k2<<endl;
+          if(needp(k3))
+	     cout<<3<<":"<<k3<<endl;
+          if(needp(k4))
+	     cout<<4<<":"<<k4<<endl;
+          if(needp(k5))
+	     cout<<5<<endl;
+          if(needp(k6))
+	     cout<<6<<endl;
+          if(needp(k7))
+	     cout<<7<<endl;
+          if(needp(k8))
+	     cout<<8<<endl;
+           if(needp(k9))
+	     cout<<9<<endl;
+          if(needp(k10))
+	     cout<<10<<endl;
+
+          cout<<"--------------------------"<<endl;
+
+	 try{
+            date op1="1220-12-13";
+	 }catch(exception& e){
+            cout<<e.what()<<endl;
+	 }
+	 try{
+	    myorm::time op2="-------";
+	 }catch(exception& e){
+            cout<<e.what()<<endl;
+	 }
+	 try{
+            datetime op3="-------";
+	 }catch(exception& e){
+            cout<<e.what()<<endl;
+	 }
+*/
+//         auto&& res=conn.query(tb.update({"sex","age"},VALUES("男",21),"name='waq'"));
+
+
+//	 table<Node2> tb("time_test");
+/*
+	 schema tb("time_test");
+
+	 tb["id"]="int not null";
+	 tb["k1"]="date";
+	 tb["k2"]="time";
+	 tb["k3"]="datetime";
+	 tb.setKey("id");
+*/
+
+/*	 
+	 Node2 p1,p2,p3;
+	 p1.id=1;
+	 p1.k1="2002-6-18";
+	 p2.id=2;
+	 p2.k2="13:14:52";
+	 p3.id=3;
+	 p3.k3="2002-6-18 13:14:52";
+
+         auto&& res=conn.query(tb.insert({p1,p2,p3}));
+*/
+
+/*	 
+         datetime where;
+	 where.year=2002;
+	 where.month=6;
+	 where.day=18;
+	 where.hour=13;
+	 where.minute=14;
+	 where.second=52;
+*/
+/*	 auto&& res=conn.query(tb.select());
+
+
+         optional<string> str1;
+	 str1="huanggang";
+
+	 optional<string> str2="waq";
+
+         optional<string> str3;
+	  
+	 cout<<"1:"<<str1<<endl;
+	 cout<<"2:"<<str2<<endl;
+	 cout<<"3:"<<str3<<endl;
+
+         if(res){
+             cout<<"success:"<<res.affected()<<endl;
+
+             auto&& vec=res.get_table<Node2>();
+
+	     for(auto& v:vec){
+
+                 cout<<"id:"<<v.id<<endl;
+                 cout<<"k1:"<<v.k1<<endl;
+		 cout<<"k2:"<<v.k2<<endl;
+		 cout<<"k3:"<<v.k3<<endl;
+	     }
+
 	 }else{
-            std::cout<<"NO"<<std::endl;
+	     cout<<"fialed:"<<conn.error()<<endl;
+	 }
+*/
+
+         if(conn.startTransaction()){
+             cout<<"开始事务"<<endl;
 	 }
 
-         std::cout<<myorm::table<Node>::insert("test_table",{kk,nn,pp})<<std::endl;
-	 std::cout<<myorm::table<Node>::remove<int,&Node::age>("test_table",2)<<std::endl;
-         std::cout<<myorm::table<Node>::update("test_table","age",12,"id=2107310108")<<std::endl;
-	 std::cout<<myorm::table<Node>::update("test_table",{"age","name","addr"},VALUES(123,"waq","南宁"),"id=2107310108")<<std::endl;
+         table<Node> tb("myorm");
 
-	 myorm::schema tb("users");
+         auto&& res=conn.query(tb.remove("name='waq'"));
 
-	 tb["age"]="int not null";
-	 tb["name"]="varchar(50) not null";
-	 tb["addr"]="varchar(50)";
-         tb.setKey("age");
+	 if(res){
+            cout<<"success:"<<res.affected()<<endl;
+	 }
 
-	 std::cout<<tb.stmt()<<std::endl;
+         auto&& res2=conn.query(tb.select());
 
-	 myorm::connection conn(myorm::connect_options("localhost","root","Hg@200258","hg_test"));
+	 if(res2){
+	     auto&& vec=res2.get_table<Node>();
 
-         if(conn){
+	     for(auto&& v:vec){
 
-              auto table=conn.get_table<Node>("test_table");
+		 cout<<"name:"<<v.name<<endl;
+		 cout<<"id:"<<v.id<<endl;
+		 cout<<"sex:"<<v.sex<<endl;
+		 cout<<"age:"<<v.age<<endl;
+	     }
 
-	      for(auto& row:table){
-                  std::cout<<"name:"<<row.name<<std::endl;
-                  std::cout<<"age:"<<row.age<<std::endl;
-                  std::cout<<"id:"<<row.id<<std::endl;
-                  std::cout<<"addr:"<<row.addr<<std::endl;
-	      }
+	     if(conn.commit()){
+		 cout<<"提交成功"<<endl;
+	     }
+         }else{
+             cout<<"执行失败"<<endl;
 	 }
 
          return 0;
-     }
+
+}
 
 #endif
+
+
+
+
+
+
+
 
 
 
