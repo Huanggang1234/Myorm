@@ -192,7 +192,7 @@ namespace myorm{
 
                optional(const __null_value& _value):no_value(true){}
 
-               const T& operator*(){
+               const T& operator*() const{
                    return value;
 	       }
 
@@ -229,11 +229,20 @@ namespace myorm{
 		    return _null_value;
 	       }
 
-               operator bool(){
+               operator bool() const{
                     return !no_value;
 	       }
 
+	       operator const T&() const{
+                   return value;
+	       }
+	       operator T() const{
+                   return value;
+	       }
+
      };
+
+
 
      template<typename T>
      struct is_option:public std::false_type{};
@@ -246,6 +255,7 @@ namespace myorm{
 
      template<typename T>
      struct is_option<optional<T>&>:public std::true_type{};
+
 
      template<typename T>
      std::stringstream& operator<<(std::stringstream&sm,optional<T>& value){
@@ -1308,9 +1318,10 @@ inline constexpr auto StructSchema<Struct>(){ \
               MYSQL* conn;
               std::mutex mtx;
 	      std::string error_msg;
+	      connect_options option;
 	   public:
 
-	      connection(const connect_options& options){
+	      connection(const connect_options& options,bool open_now=true){
                    
 		   variable::overall_mutex.lock();
                    conn=mysql_init(nullptr);
@@ -1319,7 +1330,11 @@ inline constexpr auto StructSchema<Struct>(){ \
                        error_msg="insufficient memory";
 		       return;
 		   }
-		   open(options);
+		   if(open_now)
+		      open(options);
+		   else{
+                      option=std::move(options);
+		   }
 	      }
              
               ~connection(){
@@ -1369,6 +1384,12 @@ inline constexpr auto StructSchema<Struct>(){ \
 		  return conn==nullptr;
 	      }
 
+              bool open(){
+                   return open(option);
+	      }
+
+
+
               void close(){
 
                    if(conn==nullptr)return;
@@ -1387,7 +1408,9 @@ inline constexpr auto StructSchema<Struct>(){ \
 	      }
 
               operator bool() const{
-                
+                   if(conn==nullptr){
+                     return false;
+		   }
                    return is_open();
 
 	      }
@@ -1483,237 +1506,6 @@ inline constexpr auto StructSchema<Struct>(){ \
 
 }
 
-     using namespace myorm;
-     using namespace std;
-
-struct Node{
-     std::string name;
-     int id;
-     optional<std::string> sex;
-     optional<int> age;
-};
-
-
-DEFINE_STRUCT(
-    Node,
-    DEFINE_FIELD(name,"name"),
-    DEFINE_FIELD(id,"id"),
-    DEFINE_FIELD(sex,"sex"),
-    DEFINE_FIELD(age,"age")
-)
-
-
-struct Node2{
-    int id;
-    optional<date> k1;
-    optional<myorm::time> k2;
-    optional<datetime> k3;
-};
-
-DEFINE_STRUCT(
-    Node2,
-    DEFINE_FIELD(id,"id"),
-    DEFINE_FIELD(k1,"k1"),
-    DEFINE_FIELD(k2,"k2"),
-    DEFINE_FIELD(k3,"k3")
-)
-
-
-     int main(){
-
-	 connection conn(myorm::connect_options("localhost","root","Hg@200258","hg_test"));
-/*
-         schema tab("myorm");
-
-	 tab["name"]="varchar(30) not null";
-         tab["id"]="int not null";
-	 tab["sex"]="varchar(10)";
-	 tab["age"]="int";
-	 tab.setKey("id");
-
-         result&& res=conn.query(tab.stmt());
-*/      
-//        table<Node> tb("myorm");
-
-//         auto&& res=conn.query(tb.insert({"zqz",28177051,null_value,null_value}));
-/*
-         auto&& res=conn.query(tb.update("id",31415926,"name like 'd%'"));
-*/
-
-//         auto&& res=conn.query(tb.remove<int,&Node::age>(null_value));
-
-//         auto&& res=conn.query(tb.remove("sex='男'"));
-
-//         auto&& res=conn.query(tb.select({"name","age"},"name='waq'"));
-      
-//	 auto&& res=conn.query(tb.select("name","id"));
-
-/*
-         datetime nn;
-	 nn.year=2002;
-	 nn.month=6;
-	 nn.day=18;
-	 nn.hour=9;
-	 nn.minute=17;
-	 nn.second=37;
-
-	 cout<<nn<<endl;
-
-
-         optional<std::string> k1="huangg";
-	 optional<date> k2="2002-6-18";
-	 optional<myorm::time> k3="14:34:52";
-	 optional<datetime> k4="1998-9-10 13:7:12";
-	 std::string k5;
-	 date k6;
-	 myorm::time k7;
-	 datetime k8;
-         optional<int> k9;
-	 int k10;
-
-         cout<<"k3:"<<k3<<endl;
-
-          if(needp(k1))
-	     cout<<1<<endl;
-          if(needp(k2))
-	     cout<<2<<":"<<k2<<endl;
-          if(needp(k3))
-	     cout<<3<<":"<<k3<<endl;
-          if(needp(k4))
-	     cout<<4<<":"<<k4<<endl;
-          if(needp(k5))
-	     cout<<5<<endl;
-          if(needp(k6))
-	     cout<<6<<endl;
-          if(needp(k7))
-	     cout<<7<<endl;
-          if(needp(k8))
-	     cout<<8<<endl;
-           if(needp(k9))
-	     cout<<9<<endl;
-          if(needp(k10))
-	     cout<<10<<endl;
-
-          cout<<"--------------------------"<<endl;
-
-	 try{
-            date op1="1220-12-13";
-	 }catch(exception& e){
-            cout<<e.what()<<endl;
-	 }
-	 try{
-	    myorm::time op2="-------";
-	 }catch(exception& e){
-            cout<<e.what()<<endl;
-	 }
-	 try{
-            datetime op3="-------";
-	 }catch(exception& e){
-            cout<<e.what()<<endl;
-	 }
-*/
-//         auto&& res=conn.query(tb.update({"sex","age"},VALUES("男",21),"name='waq'"));
-
-
-//	 table<Node2> tb("time_test");
-/*
-	 schema tb("time_test");
-
-	 tb["id"]="int not null";
-	 tb["k1"]="date";
-	 tb["k2"]="time";
-	 tb["k3"]="datetime";
-	 tb.setKey("id");
-*/
-
-/*	 
-	 Node2 p1,p2,p3;
-	 p1.id=1;
-	 p1.k1="2002-6-18";
-	 p2.id=2;
-	 p2.k2="13:14:52";
-	 p3.id=3;
-	 p3.k3="2002-6-18 13:14:52";
-
-         auto&& res=conn.query(tb.insert({p1,p2,p3}));
-*/
-
-/*	 
-         datetime where;
-	 where.year=2002;
-	 where.month=6;
-	 where.day=18;
-	 where.hour=13;
-	 where.minute=14;
-	 where.second=52;
-*/
-/*	 auto&& res=conn.query(tb.select());
-
-
-         optional<string> str1;
-	 str1="huanggang";
-
-	 optional<string> str2="waq";
-
-         optional<string> str3;
-	  
-	 cout<<"1:"<<str1<<endl;
-	 cout<<"2:"<<str2<<endl;
-	 cout<<"3:"<<str3<<endl;
-
-         if(res){
-             cout<<"success:"<<res.affected()<<endl;
-
-             auto&& vec=res.get_table<Node2>();
-
-	     for(auto& v:vec){
-
-                 cout<<"id:"<<v.id<<endl;
-                 cout<<"k1:"<<v.k1<<endl;
-		 cout<<"k2:"<<v.k2<<endl;
-		 cout<<"k3:"<<v.k3<<endl;
-	     }
-
-	 }else{
-	     cout<<"fialed:"<<conn.error()<<endl;
-	 }
-*/
-
-         if(conn.startTransaction()){
-             cout<<"开始事务"<<endl;
-	 }
-
-         table<Node> tb("myorm");
-
-         auto&& res=conn.query(tb.remove("name='waq'"));
-
-	 if(res){
-            cout<<"success:"<<res.affected()<<endl;
-	 }
-
-         auto&& res2=conn.query(tb.select());
-
-	 if(res2){
-	     auto&& vec=res2.get_table<Node>();
-
-	     for(auto&& v:vec){
-
-		 cout<<"name:"<<v.name<<endl;
-		 cout<<"id:"<<v.id<<endl;
-		 cout<<"sex:"<<v.sex<<endl;
-		 cout<<"age:"<<v.age<<endl;
-	     }
-
-	     if(conn.commit()){
-		 cout<<"提交成功"<<endl;
-	     }
-         }else{
-             cout<<"执行失败"<<endl;
-	 }
-
-         return 0;
-
-}
 
 #endif
 
